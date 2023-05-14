@@ -22,6 +22,9 @@
 #define STREAM_SERVICE1        2  /* NEW: Random-number stream for 1st service times. */
 #define STREAM_SERVICE2        3  /* NEW: Random-number stream for 2nd service times. */
 
+#define Q_LIMIT1 7 /* NEW: Buffer size for node 1 */
+#define Q_LIMIT2 INFINITY /* NEW: Buffer size for node 2 */
+
 /* Declare non-simlib global variables. */
 
 int   num_custs_delayed, num_delays_required;
@@ -71,24 +74,26 @@ main()  /* Main function. */
 
     /* Run the simulation while more delays are still needed. */
 
-    while (num_custs_delayed < num_delays_required) {
+    while (sim_time <= 100000/*num_custs_delayed < num_delays_required*/) {
 
         /* Determine the next event. */
-
+ 
         timing();
 
         /* Invoke the appropriate event function. */
-        fprintf(outfile, "\nCurrent time: %f\n", sim_time);
-        fprintf(outfile, "Current event: %d\n", next_event_type);
 
         switch (next_event_type) {
             case EVENT_ARRIVAL1:
+                // printf("Arrival 1 event time %.6f: \n", sim_time);
                 arrive1();
                 break;
             case EVENT_ARRIVAL2:
+                // printf("Arrival 2 event: %.6f: \n", sim_time);
                 arrive2();
                 break;
             case EVENT_DEPARTURE:
+                // printf("Departure event: %.6f: \n", sim_time);
+
                 depart();
                 break;
         }
@@ -116,12 +121,22 @@ void init_model(void)  /* Initialization function. */
 
 void arrive1(void)  /* Arrival event function. */
 {
-    
+    /* Schedule next arrival. */
+
+    event_schedule(sim_time + expon(mean_interarrival, STREAM_INTERARRIVAL),
+                   EVENT_ARRIVAL1);
 
     /* Check to see whether server is busy (i.e., list SERVER contains a
        record). */
 
     if (list_size[LIST_SERVER1] == 1) {
+        /* Check to see if the queue is full. If that's the case we do nothing. */
+        if (list_size[LIST_QUEUE1] > Q_LIMIT1) {
+            printf("Customer blocked because queue 1 size: %d\n", list_size[LIST_QUEUE1]);
+            sampst(0, SAMPST_DELAYS1);
+
+            return;
+        }
 
         /* Server is busy, so store time of arrival of arriving customer at end
            of list LIST_QUEUE1. */
@@ -146,7 +161,6 @@ void arrive1(void)  /* Arrival event function. */
         list_file(FIRST, LIST_SERVER1);
 
         /* Schedule a departure (service completion). */
-
         event_schedule(sim_time + expon(mean_service, STREAM_SERVICE1),
                        EVENT_ARRIVAL2);
     }
@@ -158,18 +172,10 @@ void arrive1(void)  /* Arrival event function. */
 
 void arrive2(void)  /* Arrival event function. */
 {
-    /* Schedule next arrival. */
-
-    event_schedule(sim_time + expon(mean_interarrival, STREAM_INTERARRIVAL),
-                   EVENT_ARRIVAL1);
-
-    list_remove(FIRST, LIST_NODE1_ARRIVAL);
-    sampst(sim_time - transfer[1], SAMPST_DELAYS1);
 
     /* Check to see whether queue is empty. */
 
     if (list_size[LIST_QUEUE1] == 0) {
-
         /* The queue is empty, so make the server idle and leave the departure
            (service completion) event out of the event list. (It is currently
            not in the event list, having just been removed by timing before
@@ -178,6 +184,8 @@ void arrive2(void)  /* Arrival event function. */
         list_remove(FIRST, LIST_SERVER1);
     } else {
         list_remove(FIRST, LIST_QUEUE1);
+        event_schedule(sim_time + expon(mean_service, STREAM_SERVICE1),
+                EVENT_ARRIVAL2);
     }
 
 
@@ -185,6 +193,13 @@ void arrive2(void)  /* Arrival event function. */
        record). */
 
     if (list_size[LIST_SERVER2] == 1) {
+        /* Check to see if the queue is full. If that's the case ignore the arriving customer. */
+        if (list_size[LIST_QUEUE2] > Q_LIMIT2) {
+            printf("Customer blocked because queue 2 size: %d\n", list_size[LIST_QUEUE2]);
+            list_remove(FIRST, LIST_SYSTEM_ARRIVAL);
+            list_remove(FIRST, LIST_NODE1_ARRIVAL);
+            return;
+        }
 
         /* Server is busy, so store time of arrival of arriving customer at end
            of list LIST_QUEUE. */
@@ -212,6 +227,8 @@ void arrive2(void)  /* Arrival event function. */
                        EVENT_DEPARTURE);
     }
 
+    list_remove(FIRST, LIST_NODE1_ARRIVAL);
+    sampst(sim_time - transfer[1], SAMPST_DELAYS1);
     transfer[1] = sim_time;
     list_file(LAST, LIST_NODE2_ARRIVAL);
 }
